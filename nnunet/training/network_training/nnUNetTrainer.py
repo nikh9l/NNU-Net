@@ -108,7 +108,10 @@ class nnUNetTrainer(NetworkTrainer):
         self.loss = DC_and_CE_loss({'batch_dice': self.batch_dice, 'smooth': 1e-5, 'do_bg': False}, {})
 
         self.online_eval_foreground_dc = []
+        self.online_eval_specificity = []
+        self.online_eval_sensitivity = []
         self.online_eval_tp = []
+        self.online_eval_tn = []
         self.online_eval_fp = []
         self.online_eval_fn = []
 
@@ -678,38 +681,58 @@ class nnUNetTrainer(NetworkTrainer):
             target = target[:, 0]
             axes = tuple(range(1, len(target.shape)))
             tp_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
+            tn_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
             fp_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
             fn_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
             for c in range(1, num_classes):
                 tp_hard[:, c - 1] = sum_tensor((output_seg == c).float() * (target == c).float(), axes=axes)
+                tn_hard[:, c - 1] = sum_tensor((output_seg != c).float() * (target != c).float(), axes=axes)
                 fp_hard[:, c - 1] = sum_tensor((output_seg == c).float() * (target != c).float(), axes=axes)
                 fn_hard[:, c - 1] = sum_tensor((output_seg != c).float() * (target == c).float(), axes=axes)
 
             tp_hard = tp_hard.sum(0, keepdim=False).detach().cpu().numpy()
+            tn_hard = tn_hard.sum(0, keepdim=False).detach().cpu().numpy()
             fp_hard = fp_hard.sum(0, keepdim=False).detach().cpu().numpy()
             fn_hard = fn_hard.sum(0, keepdim=False).detach().cpu().numpy()
 
             self.online_eval_foreground_dc.append(list((2 * tp_hard) / (2 * tp_hard + fp_hard + fn_hard + 1e-8)))
+            self.online_eval_specificity.append(list(tn_hard / (tn_hard + fp_hard)))
+            self.online_eval_sensitivity.append(list(tp_hard / (tp_hard + fn_hard)))
             self.online_eval_tp.append(list(tp_hard))
+            self.online_eval_tn.append(list(tn_hard))
             self.online_eval_fp.append(list(fp_hard))
             self.online_eval_fn.append(list(fn_hard))
 
     def finish_online_evaluation(self):
         self.online_eval_tp = np.sum(self.online_eval_tp, 0)
+        self.online_eval_tn = np.sum(self.online_eval_tn, 0)
         self.online_eval_fp = np.sum(self.online_eval_fp, 0)
         self.online_eval_fn = np.sum(self.online_eval_fn, 0)
 
         global_dc_per_class = [i for i in [2 * i / (2 * i + j + k) for i, j, k in
                                            zip(self.online_eval_tp, self.online_eval_fp, self.online_eval_fn)]
                                if not np.isnan(i)]
+        global_specificity = [i for i in [i / (i + j) for i, j in 
+                                         zip(self.online_evla_tn, self.online_eval_fp)]
+                             if not np.isnan(i)]
+        global_sensitivity = [i for i in [i / (i + j) for i, j in 
+                                         zip(self.online_eval_tp, self.online_eval_fn)]
+                             if not np.isnan(i)]
         self.all_val_eval_metrics.append(np.mean(global_dc_per_class))
-
+        np.mean(global_specificity)
+        np.mean(global_sensitivity)
+        
         self.print_to_log_file("Average global foreground Dice:", str(global_dc_per_class))
         self.print_to_log_file("(interpret this as an estimate for the Dice of the different classes. This is not "
                                "exact.)")
+        self.print_to_log_file("Specificity:", str(global_specificity))
+        self.print_to_log_file("Sensitivity:", str(global_sensitivity))
 
         self.online_eval_foreground_dc = []
+        self.online_eval_specificity = []
+        self.online_eval_sensitivity = []
         self.online_eval_tp = []
+        self.online_eval_tn = []
         self.online_eval_fp = []
         self.online_eval_fn = []
 
