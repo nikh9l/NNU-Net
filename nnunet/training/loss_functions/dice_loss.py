@@ -452,7 +452,7 @@ class TverskyLoss(nn.Module):
         if self.apply_nonlin is not None:
             x = self.apply_nonlin(x)
 
-        tp, fp, fn = get_tp_fp_fn(x, y, axes, loss_mask, self.square)
+        tp, fp, fn, _ = get_tp_fp_fn_tn(x, y, axes, loss_mask, self.square)
 
 
         tversky = (tp + self.smooth) / (tp + self.alpha*fp + self.beta*fn + self.smooth)
